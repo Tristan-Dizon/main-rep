@@ -1,0 +1,345 @@
+CREATE OR REPLACE PROCEDURE `hrl-dev-edf-scm-share.s_o9.sp_i_s_m_account_master`()
+OPTIONS (strict_mode=false)
+BEGIN
+
+#########################################################################################################################################
+# Description: For  o9                                                                                                                  #
+# Type:                                                                                                                                 #
+# Frequency: Batch                                                                                                                      #
+# Author: Jigers Alina				                                                                                                       #
+# Version history:                                                                                                                      #
+#----------------------------------------------------------------------------------------------------                                   #
+# Version | Date       | JIRA #   | Author                       | Vendor    | Changes                                                  #
+# 1.0     | 2024-06-11 | EDP-1447 | jalina@hfcpartners.com       | Accenture | Migrate x_o9 to s_o9                                     #
+# 1.1     | 2024-06-19 | EDP-1447 | jcalapardo@hfcpartners.com   | Accenture | Update naming convention                                 #
+# 1.2     | 2024-06-20 | EDP-1447 | jalina@hfcpartners.com       | Accenture | Optimize, restructure, apply code style                  #
+# 1.3     | 2024-07-03 | EDP-1239 | clang1@hfcpartners.com       | Accenture | Additional Column rec_id and load_datetime               #
+# 1.4     | 2024-07-03 | EDP-1761 | ldedullantes@hfcpartners.com | Accenture | revised to use customer_division as source and concat    #
+# 1.5     | 2024-08-07 | EDP-2420 | jalina@hfcpartners.com       | Accenture | add field deliverto_number                               #
+# 1.6     | 2024-08-08 | EDP-2420 | tristan.jay.dizon@accenture.com| Accenture | Optimize, restructure, apply code style                #
+#########################################################################################################################################
+
+---------------------------------------------------------------------------------------------------------
+-- Main Logic --
+---------------------------------------------------------------------------------------------------------
+
+TRUNCATE TABLE `hrl-dev-edf-scm-share.s_o9.account_master`;
+
+insert into `hrl-dev-edf-scm-share.s_o9.account_master`
+
+with 
+
+t_ohcd as 
+   (
+      select 
+         oh.outlet_segment_key as account_segment,
+         cust.customer_division_key as account,
+         cust.customer_division_name as account_desc,
+         cust.oracle_deliverto_number,
+         oh.cust_key,
+         oh.outlet_territory_key,
+         oh.outlet_territory_name,
+         oh.outlet_district_key,
+         oh.outlet_district_name,
+         oh.outlet_region_key,
+         oh.outlet_region_name, 
+         oh.outlet_division_key,
+         oh.outlet_division_name,
+         oh.outlet_segment_key,
+                  
+
+         from `hrl-dev-edf.interim_stage.outlet_hierarchy` oh 
+         right outer join `hrl-dev-edf.interim_stage.customer_division` cust
+         on (oh.customer_division_key = cust.customer_division_key ) 
+
+   )
+
+, t_acctsegs as 
+   ( 
+      select 
+      toh.account_segment , 
+      toh.account,
+      toh.account_desc, 
+      toh.oracle_deliverto_number,
+      toh.cust_key,
+      toh.outlet_territory_key,
+      toh.outlet_territory_name,
+      toh.outlet_district_key,
+      toh.outlet_district_name,
+      toh.outlet_region_key,
+      toh.outlet_region_name, 
+      toh.outlet_division_key,
+      toh.outlet_division_name,
+      toh.outlet_segment_key
+   
+
+
+      from t_ohcd toh
+   where toh.account_segment in ('FS','RT','IN')
+   )
+
+, account_master_table as (
+select 
+ta.account_segment account_segment,
+ta.account Account,
+ta.account_desc AccountDesc,
+(case when upper(planto_key) = upper('Unspecified') then outlet_territory_key
+      else ifnull(planto_key,outlet_territory_key)
+   end) Planning_Account,
+(case when upper(planto_name) = upper('Unspecified') then outlet_territory_name
+      else ifnull(planto_name,outlet_territory_name)
+   end) Planning_Account_desc,
+(case when upper(planto_district_key) = upper('Unspecified') then outlet_district_key
+      else ifnull(planto_district_key,outlet_district_key)
+   end) Account_L1,
+(case when upper(planto_district_name) = upper('Unspecified') then outlet_district_name
+      else ifnull(planto_district_name,outlet_district_name)
+   end) Account_L1Desc,
+(case when upper(planto_region_key) = upper('Unspecified') then outlet_region_key
+      else ifnull(planto_region_key,outlet_region_key)
+   end) Account_L2,
+(case when upper(planto_region_name) = upper('Unspecified') then outlet_region_name
+      else ifnull(planto_region_name,outlet_region_name)
+   end) Account_L2Desc,
+(case when upper(planto_division_key) = upper('Unspecified') then outlet_division_key
+      else ifnull(planto_division_key,outlet_division_key)
+   end) Account_L3,
+(case when upper(planto_division_name) = upper('Unspecified') then outlet_division_name
+      else ifnull(planto_division_name,outlet_division_name)
+   end) Account_L3Desc,
+'All' Account_L4,
+'All' Account_L4Desc,
+(case when upper(planto_key) = upper('Unspecified') then outlet_territory_key
+      else ifnull(planto_key,outlet_territory_key)
+   end) Stat_Account,
+(select account_geo_region from `hrl-dev-edf-scm-share.s_o9.geo_region`  gr 
+where gr.account_ship_to = ta.customer_division_key) Account_Region,
+'All' Account_L5,
+'All' Account_L5Desc,
+outlet_territory_key Account_Territory,
+outlet_territory_name Account_territory_desc
+,ta.oracle_deliverto_number as oracle_deliverto_number --Added as part of EDP-1761
+, 1 as is_plan_to
+ from 
+ `hrl-dev-edf.interim_stage.planto_hierarchy` pth
+ right outer join t_acctsegs ta
+on (pth.customer_division_key = ta.customer_division_key )
+ where account_segment = 'RT'
+ --and ta.account like '0000001'
+ -- and 1=2
+ UNION distinct
+ select 
+ta.account_segment account_segment,
+ta.account Account,
+ta.account_desc AccountDesc,
+ outlet_territory_key Planning_Account,
+outlet_territory_name Planning_Account_desc,
+outlet_district_key Account_L1,
+outlet_district_name Account_L1Desc,
+outlet_region_key Account_L2,
+outlet_region_name Account_L2Desc,
+outlet_division_key Account_L3,
+outlet_division_name Account_L3Desc,
+'All' Account_L4,
+'All' Account_L4Desc,
+outlet_territory_key Stat_Account,
+(select account_geo_region from `hrl-dev-edf-scm-share.s_o9.geo_region`  gr 
+where gr.account_ship_to = ta.customer_division_key ) Account_Region,
+'All' Account_L5,
+'All' Account_L5Desc,
+outlet_territory_key Account_Territory,
+outlet_territory_name Account_territory_desc
+,ta.oracle_deliverto_number oracle_deliverto_number
+, 0 as is_plan_to
+ from 
+ t_acctsegs ta
+ where account_segment = 'IN'
+ --and 1=2
+ UNION distinct
+ select 
+ta.account_segment account_segment,
+ta.account Account,
+ta.account_desc AccountDesc,
+ key_account_key Planning_Account,
+key_account_name Planning_Account_desc,
+key_account_key Account_L1,
+key_account_name Account_L1Desc,
+key_account_key Account_L2,
+key_account_name Account_L2Desc,
+outlet_division_key Account_L3,
+outlet_division_name Account_L3Desc,
+'All' Account_L4,
+'All' Account_L4Desc,
+key_account_key Stat_Account,
+(select account_geo_region from `hrl-dev-edf-scm-share.s_o9.geo_region`  gr 
+where gr.account_ship_to = ta.customer_division_key ) Account_Region,
+'All' Account_L5,
+'All' Account_L5Desc,
+outlet_territory_key Account_Territory,
+outlet_territory_name Account_territory_desc
+,ta.oracle_deliverto_number oracle_deliverto_number--Added as part of EDP-1761
+
+, 0 as is_plan_to
+ from 
+ (select substr(ka.key_account_key,1,2) start_text,substr(ka.key_account_key,-4) end_text,
+ substr(ka.key_account_key,-6) dg_end_text,ka.* from `hrl-dev-edf.interim_stage.key_account_hierarchy` ka) kah 
+, t_acctsegs ta
+ where 1=1
+and kah.shipto_key = ta.cust_key 
+ and account_segment = 'FS'
+ and ( 
+      (start_text  = ('DG')
+      and regexp_replace(SUBSTR(key_account_key, -3), '[^0-9]','') <> ''
+      and dg_end_text >= '000101' and dg_end_text <= '020000'
+      ) or
+       (start_text  = ('HL')
+      and regexp_replace(SUBSTR(key_account_key, -3), '[^0-9]','') <> ''
+      and end_text >= '6000' and end_text <= '9999'
+      ) or
+       (start_text  = ('BK')
+      and regexp_replace(SUBSTR(key_account_key, -3), '[^0-9]','') <> ''
+      and end_text >= '0012' and end_text <= '9999'
+      ) or
+      (start_text  = ('DP')
+      and regexp_replace(SUBSTR(key_account_key, -3), '[^0-9]','') <> ''
+      and end_text >= '0032' and end_text <= '9999'
+      )
+   )  
+   --and 1=2
+   UNION distinct
+   select 
+ta.account_segment account_segment,
+ta.account Account,
+ta.account_desc AccountDesc,
+outlet_territory_key Planning_Account,
+outlet_territory_name Planning_Account_desc,
+outlet_district_key Account_L1,
+outlet_district_name Account_L1Desc,
+outlet_region_key Account_L2,
+outlet_region_name Account_L2Desc,
+outlet_division_key Account_L3,
+outlet_division_name Account_L3Desc,
+'All' Account_L4,
+'All' Account_L4Desc,
+outlet_territory_key Stat_Account,
+(select account_geo_region from `hrl-dev-edf-scm-share.s_o9.geo_region`  gr 
+where gr.account_ship_to = ta.customer_division_key ) Account_Region,
+'All' Account_L5,
+'All' Account_L5Desc,
+outlet_territory_key Account_Territory,
+outlet_territory_name Account_territory_desc
+,ta.oracle_deliverto_number oracle_deliverto_number --Added as part of EDP-1761
+, 0 as is_plan_to
+ from t_acctsegs ta
+  where account_segment = 'FS' 
+  and (not exists (select 1 from `hrl-dev-edf.interim_stage.key_account_hierarchy` kas
+                     where kas.shipto_key = ta.cust_key)
+         or  not exists (select 1 from `hrl-dev-edf.interim_stage.key_account_hierarchy` kas
+                     where kas.shipto_key = ta.cust_key
+                     and substr(kas.key_account_key,1,2)  in ('DG','HL','BK','DP')   
+         )
+            or not exists (                                     
+select 1 from (select substr(kas.key_account_key,1,2) start_text,substr(kas.key_account_key,-4) end_text, substr(kas.key_account_key,-6) dg_end_text,kas.* from `hrl-dev-edf.interim_stage.key_account_hierarchy` kas) kahs 
+                     , t_acctsegs tas
+                     where 1=1
+                     and  tas.cust_key = ta.cust_key 
+                     and kahs.shipto_key = tas.cust_key 
+                     and tas.account_segment = 'FS'
+                        and ( 
+                           (kahs.start_text  = ('DG')
+                           and regexp_replace(SUBSTR(kahs.key_account_key, -3), '[^0-9]','') <> ''
+                           and dg_end_text >= '000101' and dg_end_text <= '020000'
+                           ) or
+                           (start_text  = ('HL')
+                           and regexp_replace(SUBSTR(kahs.key_account_key, -3), '[^0-9]','') <> ''
+                           and end_text >= '6000' and end_text <= '9999'
+                           ) or
+                           (start_text  = ('BK')
+                           and regexp_replace(SUBSTR(kahs.key_account_key, -3), '[^0-9]','') <> ''
+                           and end_text >= '0012' and end_text <= '9999'
+                           ) or
+                           (start_text  = ('DP')
+                           and regexp_replace(SUBSTR(kahs.key_account_key, -3), '[^0-9]','') <> ''
+                           and end_text >= '0032' and end_text <= '9999'
+                           )
+                             ) 
+                       )
+         )
+         --and 1=2    
+--Added as part of EDP-1761
+         UNION DISTINCT
+         select 
+ta.account_segment account_segment,
+ta.account Account,
+ta.account_desc AccountDesc,
+(case when upper(planto_key) = upper('Unspecified') then outlet_territory_key
+      else ifnull(planto_key,outlet_territory_key)
+   end) Planning_Account,
+(case when upper(planto_name) = upper('Unspecified') then outlet_territory_name
+      else ifnull(planto_name,outlet_territory_name)
+   end) Planning_Account_desc,
+(case when upper(planto_district_key) = upper('Unspecified') then outlet_district_key
+      else ifnull(planto_district_key,outlet_district_key)
+   end) Account_L1,
+(case when upper(planto_district_name) = upper('Unspecified') then outlet_district_name
+      else ifnull(planto_district_name,outlet_district_name)
+   end) Account_L1Desc,
+(case when upper(planto_region_key) = upper('Unspecified') then outlet_region_key
+      else ifnull(planto_region_key,outlet_region_key)
+   end) Account_L2,
+(case when upper(planto_region_name) = upper('Unspecified') then outlet_region_name
+      else ifnull(planto_region_name,outlet_region_name)
+   end) Account_L2Desc,
+(case when upper(planto_division_key) = upper('Unspecified') then outlet_division_key
+      else ifnull(planto_division_key,outlet_division_key)
+   end) Account_L3,
+(case when upper(planto_division_name) = upper('Unspecified') then outlet_division_name
+      else ifnull(planto_division_name,outlet_division_name)
+   end) Account_L3Desc,
+'All' Account_L4,
+'All' Account_L4Desc,
+(case when upper(planto_key) = upper('Unspecified') then outlet_territory_key
+      else ifnull(planto_key,outlet_territory_key)
+   end) Stat_Account,
+(select account_geo_region from `hrl-dev-edf-scm-share.s_o9.geo_region`  gr 
+where gr.account_ship_to = ta.customer_division_key) Account_Region,
+'All' Account_L5,
+'All' Account_L5Desc,
+outlet_territory_key Account_Territory,
+outlet_territory_name Account_territory_desc
+,ta.oracle_deliverto_number oracle_deliverto_number --Added as part of EDP-1761
+, 0 as is_plan_to
+ from 
+ `hrl-dev-edf.interim_stage.planto_hierarchy` pth
+ right outer join t_acctsegs ta
+on (pth.customer_division_key = ta.customer_division_key )
+ where account_segment not in ('RT','FS','IN') 
+
+ )
+
+select 
+  ROW_NUMBER() OVER (ORDER BY account) AS rec_id,
+  account_segment,
+  account,
+  AccountDesc as account_desc,
+  planning_account,
+  case when is_plan_to=1 and substr(planning_account,1,1)="P" then planning_account||" "||planning_account_desc else planning_account_desc end as planning_account_desc,
+  account_l1,
+  account_l2,
+  account_l3,
+  case when is_plan_to=1 and substr(planning_account,1,1)="P" then account_l1||" "||account_l1desc else account_l1desc end as account_l1_desc,
+  case when is_plan_to=1 and substr(planning_account,1,1)="P" then account_l2||" "||account_l2desc else account_l2desc end as account_l2_desc,
+  case when is_plan_to=1 and substr(planning_account,1,1)="P" then account_l3||" "||account_l3desc else account_l3desc end as account_l3_desc,
+  account_l4,
+  account_l4desc as account_l4_desc,
+  stat_account,
+  account_region,
+  account_l5,
+  account_l5desc as account_l5_desc,
+  account_territory,
+  account_territory_desc,
+  oracle_deliverto_number, -- added as part of EDP-2420
+  FORMAT_DATETIME('%m%d%Y %H:%M:%S', CURRENT_DATETIME('CST6CDT')) AS load_datetime
+FROM account_master_table       
+;
+END;
